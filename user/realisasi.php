@@ -12,8 +12,11 @@ $kode  = $user['kode_kelompok'];
 $pageTitle = 'Input Realisasi';
 
 $specificId = (int)($_GET['id'] ?? 0);
+$indikator  = null;
+$realisasi  = [];
+$errors     = [];
 
-// Verify ownership
+// Load indikator yang dipilih
 if ($specificId) {
     [$condition, $param] = buildPicCondition($kode, 'i');
     $stmt = $db->prepare("SELECT * FROM indikator i WHERE i.id = ? AND i.tahun_id = ? AND $condition");
@@ -30,95 +33,164 @@ if ($specificId) {
 
 // Handle POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $iid = (int)$_POST['indikator_id'];
+    $iid = (int)($_POST['indikator_id'] ?? 0);
+    if (!$iid) redirect(BASE_URL . '/user/realisasi.php');
 
     // Verify ownership
     [$condition, $param] = buildPicCondition($kode, 'i');
-    $sv = $db->prepare("SELECT id FROM indikator i WHERE i.id=? AND i.tahun_id=? AND $condition");
+    $sv = $db->prepare("SELECT id FROM indikator i WHERE i.id = ? AND i.tahun_id = ? AND $condition");
     $sv->bind_param('iss', $iid, $tid, $param);
     $sv->execute();
     if (!$sv->get_result()->num_rows) redirect(BASE_URL . '/user/indikator.php');
 
-    // Validasi: semua TW yang terbuka wajib diisi beserta link, evaluasi, tindak lanjut
-    $errors = [];
+    // Validasi:
+    // - Setiap TW boleh diisi atau dibiarkan kosong (tidak harus semua)
+    // - Jika salah satu kolom di TW diisi, maka SEMUA kolom TW itu wajib lengkap
+    // - Minimal 1 TW harus diisi
+    $adaYangDiisi = false;
     foreach ([1,2,3,4] as $tw) {
         if (!isTwOpen($tahun, $tw)) continue;
-        $val = trim($_POST["tw$tw"] ?? '');
+        $val  = trim($_POST["tw$tw"] ?? '');
         $link = trim($_POST["link_tw$tw"] ?? '');
         $eval = trim($_POST["evaluasi_tw$tw"] ?? '');
         $rtl  = trim($_POST["tindak_lanjut_tw$tw"] ?? '');
-        if ($val === '') $errors[] = "Realisasi TW $tw wajib diisi.";
-        if ($link === '') $errors[] = "Link Data Dukung TW $tw wajib diisi.";
-        if ($eval === '') $errors[] = "Evaluasi TW $tw wajib diisi.";
-        if ($rtl  === '') $errors[] = "Tindak Lanjut TW $tw wajib diisi.";
+
+        // Cek apakah ada salah satu kolom TW ini yang diisi
+        $adaIsiDiTW = ($val !== '' || $link !== '' || $eval !== '' || $rtl !== '');
+
+        if ($adaIsiDiTW) {
+            $adaYangDiisi = true;
+            if ($val  === '') $errors[] = "Realisasi TW $tw wajib diisi.";
+            if ($link === '') $errors[] = "Link Data Dukung TW $tw wajib diisi.";
+            if ($eval === '') $errors[] = "Evaluasi TW $tw wajib diisi.";
+            if ($rtl  === '') $errors[] = "Rencana Tindak Lanjut TW $tw wajib diisi.";
+        }
     }
+    if (!$adaYangDiisi) $errors[] = "Minimal satu Triwulan harus diisi.";
 
     if (empty($errors)) {
-        $d = [];
-        foreach ([1,2,3,4] as $tw) {
-            $d["tw$tw"]               = isTwOpen($tahun, $tw) && $_POST["tw$tw"] !== '' ? (float)$_POST["tw$tw"] : null;
-            $d["link_tw$tw"]          = isTwOpen($tahun, $tw) ? trim($_POST["link_tw$tw"] ?? '') : null;
-            $d["evaluasi_tw$tw"]      = isTwOpen($tahun, $tw) ? trim($_POST["evaluasi_tw$tw"] ?? '') : null;
-            $d["tindak_lanjut_tw$tw"] = isTwOpen($tahun, $tw) ? trim($_POST["tindak_lanjut_tw$tw"] ?? '') : null;
-        }
-        $d['total'] = $_POST['total_realisasi'] !== '' ? (float)$_POST['total_realisasi'] : null;
         $uid = $user['id'];
 
-        $check = $db->prepare("SELECT id FROM realisasi WHERE indikator_id=? AND tahun_id=?");
-        $check->bind_param('ii', $iid, $tid);
-        $check->execute();
-        $exists = $check->get_result()->num_rows > 0;
+        // Ambil data lama dari DB untuk menjaga TW yang tidak disubmit
+        $existingStmt = $db->prepare("SELECT * FROM realisasi WHERE indikator_id = ? AND tahun_id = ?");
+        $existingStmt->bind_param('ii', $iid, $tid);
+        $existingStmt->execute();
+        $existing = $existingStmt->get_result()->fetch_assoc();
 
-        if ($exists) {
-            $upd = $db->prepare("UPDATE realisasi SET
-                tw1=?,tw2=?,tw3=?,tw4=?,total_realisasi=?,
-                link_tw1=?,evaluasi_tw1=?,tindak_lanjut_tw1=?,
-                link_tw2=?,evaluasi_tw2=?,tindak_lanjut_tw2=?,
-                link_tw3=?,evaluasi_tw3=?,tindak_lanjut_tw3=?,
-                link_tw4=?,evaluasi_tw4=?,tindak_lanjut_tw4=?,
-                updated_by=?
-                WHERE indikator_id=? AND tahun_id=?");
-            $upd->bind_param('dddddssssssssssssiii',
-                $d['tw1'],$d['tw2'],$d['tw3'],$d['tw4'],$d['total'],
-                $d['link_tw1'],$d['evaluasi_tw1'],$d['tindak_lanjut_tw1'],
-                $d['link_tw2'],$d['evaluasi_tw2'],$d['tindak_lanjut_tw2'],
-                $d['link_tw3'],$d['evaluasi_tw3'],$d['tindak_lanjut_tw3'],
-                $d['link_tw4'],$d['evaluasi_tw4'],$d['tindak_lanjut_tw4'],
-                $uid, $iid, $tid
-            );
-            $upd->execute();
-        } else {
-            $ins = $db->prepare("INSERT INTO realisasi
-                (indikator_id,tahun_id,tw1,tw2,tw3,tw4,total_realisasi,
-                link_tw1,evaluasi_tw1,tindak_lanjut_tw1,
-                link_tw2,evaluasi_tw2,tindak_lanjut_tw2,
-                link_tw3,evaluasi_tw3,tindak_lanjut_tw3,
-                link_tw4,evaluasi_tw4,tindak_lanjut_tw4,updated_by)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-            $ins->bind_param('iidddddsssssssssssi',
-                $iid,$tid,
-                $d['tw1'],$d['tw2'],$d['tw3'],$d['tw4'],$d['total'],
-                $d['link_tw1'],$d['evaluasi_tw1'],$d['tindak_lanjut_tw1'],
-                $d['link_tw2'],$d['evaluasi_tw2'],$d['tindak_lanjut_tw2'],
-                $d['link_tw3'],$d['evaluasi_tw3'],$d['tindak_lanjut_tw3'],
-                $d['link_tw4'],$d['evaluasi_tw4'],$d['tindak_lanjut_tw4'],
-                $uid
-            );
-            $ins->execute();
+        // Bangun data: TW yang periodenya terbuka -> ambil dari POST, sisanya -> pertahankan dari DB
+        $d = [];
+        foreach ([1,2,3,4] as $tw) {
+            $open    = isTwOpen($tahun, $tw);
+            $postVal = trim($_POST["tw$tw"] ?? '');
+            if ($open && $postVal !== '') {
+                // TW ini disubmit user, pakai data POST
+                $d["tw$tw"]               = (float)str_replace(',', '.', $postVal);
+                $d["link_tw$tw"]          = trim($_POST["link_tw$tw"]          ?? '');
+                $d["evaluasi_tw$tw"]      = trim($_POST["evaluasi_tw$tw"]      ?? '');
+                $d["tindak_lanjut_tw$tw"] = trim($_POST["tindak_lanjut_tw$tw"] ?? '');
+            } else {
+                // TW ini tidak disubmit, pertahankan data lama dari DB
+                $d["tw$tw"]               = $existing["tw$tw"]               ?? null;
+                $d["link_tw$tw"]          = $existing["link_tw$tw"]          ?? null;
+                $d["evaluasi_tw$tw"]      = $existing["evaluasi_tw$tw"]      ?? null;
+                $d["tindak_lanjut_tw$tw"] = $existing["tindak_lanjut_tw$tw"] ?? null;
+            }
         }
 
-        flash('success', 'Realisasi berhasil disimpan.');
-        redirect(BASE_URL . '/user/realisasi.php?id=' . $iid);
+        if ($existing) {
+            $upd = $db->prepare("
+                UPDATE realisasi SET
+                    tw1=?, tw2=?, tw3=?, tw4=?,
+                    link_tw1=?, evaluasi_tw1=?, tindak_lanjut_tw1=?,
+                    link_tw2=?, evaluasi_tw2=?, tindak_lanjut_tw2=?,
+                    link_tw3=?, evaluasi_tw3=?, tindak_lanjut_tw3=?,
+                    link_tw4=?, evaluasi_tw4=?, tindak_lanjut_tw4=?,
+                    updated_by=?
+                WHERE indikator_id=? AND tahun_id=?
+            ");
+            $upd->bind_param(
+                'ddddssssssssssssiii',
+                $d['tw1'], $d['tw2'], $d['tw3'], $d['tw4'],
+                $d['link_tw1'], $d['evaluasi_tw1'], $d['tindak_lanjut_tw1'],
+                $d['link_tw2'], $d['evaluasi_tw2'], $d['tindak_lanjut_tw2'],
+                $d['link_tw3'], $d['evaluasi_tw3'], $d['tindak_lanjut_tw3'],
+                $d['link_tw4'], $d['evaluasi_tw4'], $d['tindak_lanjut_tw4'],
+                $uid, $iid, $tid
+            );
+            if (!$upd->execute()) {
+                $errors[] = "Gagal update: " . $upd->error;
+            }
+        } else {
+            $ins = $db->prepare("
+                INSERT INTO realisasi
+                    (indikator_id, tahun_id,
+                     tw1, tw2, tw3, tw4,
+                     link_tw1, evaluasi_tw1, tindak_lanjut_tw1,
+                     link_tw2, evaluasi_tw2, tindak_lanjut_tw2,
+                     link_tw3, evaluasi_tw3, tindak_lanjut_tw3,
+                     link_tw4, evaluasi_tw4, tindak_lanjut_tw4,
+                     updated_by)
+                VALUES (?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?)
+            ");
+            $ins->bind_param(
+                'iiddddssssssssssssi',
+                $iid, $tid,
+                $d['tw1'], $d['tw2'], $d['tw3'], $d['tw4'],
+                $d['link_tw1'], $d['evaluasi_tw1'], $d['tindak_lanjut_tw1'],
+                $d['link_tw2'], $d['evaluasi_tw2'], $d['tindak_lanjut_tw2'],
+                $d['link_tw3'], $d['evaluasi_tw3'], $d['tindak_lanjut_tw3'],
+                $d['link_tw4'], $d['evaluasi_tw4'], $d['tindak_lanjut_tw4'],
+                $uid
+            );
+            if (!$ins->execute()) {
+                $errors[] = "Gagal insert: " . $ins->error;
+            }
+        }
+
+        if (empty($errors)) {
+            // Cari TW berikutnya yang belum terisi untuk dijadikan tab aktif
+            $nextTw = 0;
+            foreach ([1,2,3,4] as $twNext) {
+                if (!isTwOpen($tahun, $twNext)) continue;
+                $chkVal = $d["tw$twNext"] ?? null;
+                if ($chkVal === null || $chkVal === '') {
+                    $nextTw = $twNext;
+                    break;
+                }
+            }
+            // Ambil nama indikator untuk log
+            $namaInd = $db->query("SELECT nama_indikator FROM indikator WHERE id=$iid")->fetch_assoc();
+            $twDisimpan = array_filter([1,2,3,4], fn($x) => isTwOpen($tahun, $x) && trim($_POST["tw$x"] ?? '') !== '');
+            $twList = implode(',', array_map(fn($x) => "TW$x", $twDisimpan));
+            logActivity('SIMPAN_REALISASI', "Simpan realisasi [$twList]: " . ($namaInd['nama_indikator'] ?? "Indikator #$iid"), 'realisasi');
+            flash('success', 'Realisasi berhasil disimpan.');
+            $redirectUrl = BASE_URL . '/user/realisasi.php?id=' . $iid;
+            if ($nextTw) $redirectUrl .= '&open_tw=' . $nextTw;
+            redirect($redirectUrl);
+        }
     }
+
+    // Jika error, reload data form
+    $specificId = $iid;
+    [$condition, $param] = buildPicCondition($kode, 'i');
+    $stmt = $db->prepare("SELECT * FROM indikator i WHERE i.id = ? AND i.tahun_id = ? AND $condition");
+    $stmt->bind_param('iss', $iid, $tid, $param);
+    $stmt->execute();
+    $indikator = $stmt->get_result()->fetch_assoc();
+
+    $stmt2 = $db->prepare("SELECT * FROM realisasi WHERE indikator_id = ? AND tahun_id = ?");
+    $stmt2->bind_param('ii', $iid, $tid);
+    $stmt2->execute();
+    $realisasi = $stmt2->get_result()->fetch_assoc() ?? [];
 }
 
-// Load all indikator list
+// Load semua indikator untuk sidebar kiri
 [$condition, $param] = buildPicCondition($kode, 'i');
 $stmt = $db->prepare("
-    SELECT i.*, r.tw1,r.tw2,r.tw3,r.tw4,r.total_realisasi,r.id AS real_id
+    SELECT i.*, r.tw1, r.tw2, r.tw3, r.tw4, r.id AS real_id
     FROM indikator i
-    LEFT JOIN realisasi r ON r.indikator_id=i.id AND r.tahun_id=i.tahun_id
-    WHERE i.tahun_id=$tid AND $condition
+    LEFT JOIN realisasi r ON r.indikator_id = i.id AND r.tahun_id = i.tahun_id
+    WHERE i.tahun_id = $tid AND $condition
     ORDER BY i.urutan
 ");
 $stmt->bind_param('s', $param);
@@ -139,7 +211,7 @@ include __DIR__ . '/../includes/sidebar.php';
 
     <div class="page-content">
         <?php $msg = getFlash('success'); if ($msg): ?>
-            <div class="alert alert-success alert-auto-hide"><?= $msg ?></div>
+            <div class="alert alert-success alert-auto-hide"><?= htmlspecialchars($msg) ?></div>
         <?php endif; ?>
 
         <div class="row g-3">
@@ -152,11 +224,11 @@ include __DIR__ . '/../includes/sidebar.php';
                     </div>
                     <div style="padding:8px;">
                         <?php foreach ($allIndikator as $row):
-                            $isFilled = $row['tw1']!==null && $row['tw2']!==null && $row['tw3']!==null && $row['tw4']!==null;
+                            $isFilled  = $row['tw1']!==null && $row['tw2']!==null && $row['tw3']!==null && $row['tw4']!==null;
                             $isPartial = !$isFilled && ($row['tw1']!==null || $row['tw2']!==null || $row['tw3']!==null || $row['tw4']!==null);
                             $isActive  = $specificId == $row['id'];
-                            $lvl = str_replace('-','',strtolower($row['leveling']));
-                            $dotColor = $isFilled ? '#059669' : ($isPartial ? '#F59E0B' : '#EF4444');
+                            $lvl       = str_replace('-','',strtolower($row['leveling']));
+                            $dotColor  = $isFilled ? '#059669' : ($isPartial ? '#F59E0B' : '#EF4444');
                         ?>
                         <a href="<?= BASE_URL ?>/user/realisasi.php?id=<?= $row['id'] ?>"
                            class="d-block text-decoration-none mb-1 p-3 rounded-3"
@@ -180,13 +252,13 @@ include __DIR__ . '/../includes/sidebar.php';
 
             <!-- Kanan: Form -->
             <div class="col-lg-8">
-                <?php if ($specificId && isset($indikator)): ?>
+                <?php if ($specificId && $indikator): ?>
 
                 <?php if (!empty($errors)): ?>
                 <div class="alert alert-danger mb-3" style="border-radius:8px;font-size:13px;">
-                    <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>Harap lengkapi semua kolom berikut:</strong>
+                    <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>Perhatian:</strong>
                     <ul class="mb-0 mt-1">
-                        <?php foreach($errors as $e): ?>
+                        <?php foreach ($errors as $e): ?>
                         <li><?= htmlspecialchars($e) ?></li>
                         <?php endforeach; ?>
                     </ul>
@@ -216,18 +288,50 @@ include __DIR__ . '/../includes/sidebar.php';
                         <div class="p-4">
 
                         <!-- Tab TW -->
+                        <?php
+                        // Tentukan tab aktif:
+                        // 1. edit_tw dari URL (user klik Edit)
+                        // 2. open_tw dari URL (setelah redirect simpan)
+                        // 3. TW pertama yang belum terisi
+                        // 4. Default TW 1
+                        $activeTab = (int)($_GET['edit_tw'] ?? 0);
+                        if (!$activeTab) $activeTab = (int)($_GET['open_tw'] ?? 0);
+                        if (!$activeTab) {
+                            $activeTab = 1;
+                            foreach([1,2,3,4] as $twCheck) {
+                                $chkVal = $realisasi["tw$twCheck"] ?? null;
+                                if ($chkVal === null || $chkVal === '') {
+                                    $activeTab = $twCheck;
+                                    break;
+                                }
+                            }
+                        }
+                        ?>
                         <ul class="nav nav-tabs mb-0" id="twTabs" role="tablist" style="border-bottom:2px solid #F5A623;">
                             <?php foreach([1,2,3,4] as $tw):
-                                $isOpen = isTwOpen($tahun, $tw);
+                                $isOpen    = isTwOpen($tahun, $tw);
+                                $twVal     = $realisasi["tw$tw"] ?? null;
+                                $twTerisi  = ($twVal !== null && $twVal !== '');
+                                // Status label di tab
+                                if ($twTerisi) {
+                                    $tabStatusColor = '#059669';
+                                    $tabStatusText  = 'Terisi';
+                                } elseif ($isOpen) {
+                                    $tabStatusColor = '#F59E0B';
+                                    $tabStatusText  = 'Buka';
+                                } else {
+                                    $tabStatusColor = '#EF4444';
+                                    $tabStatusText  = 'Tutup';
+                                }
                             ?>
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link <?= $tw===1?'active':'' ?>" id="tab-tw<?= $tw ?>"
+                                <button class="nav-link <?= $tw===$activeTab?'active':'' ?>" id="tab-tw<?= $tw ?>"
                                         data-bs-toggle="tab" data-bs-target="#panel-tw<?= $tw ?>"
                                         type="button" role="tab"
-                                        style="font-weight:700;font-size:13px;<?= $tw===1?'color:#1A1A1A;background:#F5A623;border-color:#F5A623 #F5A623 #fff;':'color:#6B7280;' ?>">
+                                        style="font-weight:700;font-size:13px;<?= $tw===$activeTab?'color:#1A1A1A;background:#F5A623;border-color:#F5A623 #F5A623 #fff;':'color:#6B7280;' ?>">
                                     TW <?= $tw ?>
-                                    <span style="font-size:10px;font-weight:600;margin-left:4px;color:<?= $isOpen?'#059669':'#EF4444' ?>;">
-                                        (<?= $isOpen?'Buka':'Tutup' ?>)
+                                    <span style="font-size:10px;font-weight:600;margin-left:4px;color:<?= $tabStatusColor ?>;">
+                                        (<?= $tabStatusText ?>)
                                     </span>
                                 </button>
                             </li>
@@ -235,103 +339,159 @@ include __DIR__ . '/../includes/sidebar.php';
                         </ul>
 
                         <div class="tab-content pt-4" id="twTabContent">
-                            <?php foreach([1,2,3,4] as $tw):
-                                $isOpen = isTwOpen($tahun, $tw);
-                                $val   = $realisasi["tw$tw"] ?? '';
-                                $link  = $realisasi["link_tw$tw"] ?? '';
-                                $eval  = $realisasi["evaluasi_tw$tw"] ?? '';
-                                $rtl   = $realisasi["tindak_lanjut_tw$tw"] ?? '';
-                                $dis   = !$isOpen ? 'disabled' : '';
-                            ?>
-                            <div class="tab-pane fade <?= $tw===1?'show active':'' ?>" id="panel-tw<?= $tw ?>" role="tabpanel">
+                            <?php
+                            // Cek TW mana yang sedang dalam mode edit (via ?edit_tw=1)
+                            $editTw = (int)($_GET['edit_tw'] ?? 0);
 
-                                <?php if (!$isOpen): ?>
-                                <div class="alert alert-warning" style="font-size:12.5px;border-radius:8px;">
-                                    <i class="bi bi-lock-fill me-1"></i>
-                                    Periode TW <?= $tw ?> belum dibuka oleh admin. Data tidak dapat diubah.
+                            foreach([1,2,3,4] as $tw):
+                                $isOpen   = isTwOpen($tahun, $tw);
+                                $val      = $realisasi["tw$tw"]               ?? null;
+                                $link     = $realisasi["link_tw$tw"]          ?? '';
+                                $eval     = $realisasi["evaluasi_tw$tw"]      ?? '';
+                                $rtl      = $realisasi["tindak_lanjut_tw$tw"] ?? '';
+                                $twTerisi = ($val !== null && $val !== '');
+                                $isEditMode = ($editTw === $tw); // user klik tombol Edit di TW ini
+                            ?>
+                            <div class="tab-pane fade <?= $tw===$activeTab?'show active':'' ?>" id="panel-tw<?= $tw ?>" role="tabpanel">
+
+                                <?php if ($twTerisi && !$isEditMode): ?>
+                                <!-- ===== MODE READ-ONLY: TW sudah terisi ===== -->
+                                <div class="d-flex align-items-center gap-2 mb-3">
+                                    <span style="background:#ECFDF5;color:#059669;border:1.5px solid #6EE7B7;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;">
+                                        <i class="bi bi-check-circle-fill me-1"></i>Sudah Terisi
+                                    </span>
+                                    <?php if (!$isOpen): ?>
+                                    <span style="background:#FEF3C7;color:#92400E;border:1.5px solid #FCD34D;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;">
+                                        <i class="bi bi-lock-fill me-1"></i>Periode Terkunci
+                                    </span>
+                                    <?php endif; ?>
+                                </div>
+
+                                <div style="background:#F9FAFB;border:1.5px solid #E5E7EB;border-radius:10px;padding:16px 20px;" class="mb-3">
+                                    <div class="row g-3">
+                                        <div class="col-12">
+                                            <div style="font-size:11px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Realisasi TW <?= $tw ?></div>
+                                            <div style="font-size:18px;font-weight:800;color:#1A1A1A;margin-top:2px;">
+                                                <?= htmlspecialchars(number_format((float)$val, 2, ',', '.')) ?>
+                                                <span style="font-size:13px;font-weight:600;color:#6B7280;"><?= htmlspecialchars($indikator['satuan']) ?></span>
+                                            </div>
+                                        </div>
+                                        <div class="col-12">
+                                            <div style="font-size:11px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Link Data Dukung</div>
+                                            <div style="font-size:13px;margin-top:2px;">
+                                                <?php if ($link): ?>
+                                                <a href="<?= htmlspecialchars($link) ?>" target="_blank" style="color:#F5A623;word-break:break-all;">
+                                                    <i class="bi bi-link-45deg me-1"></i><?= htmlspecialchars($link) ?>
+                                                </a>
+                                                <?php else: ?>
+                                                <span style="color:#9CA3AF;">—</span>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div style="font-size:11px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Evaluasi / Penjelasan Capaian</div>
+                                            <div style="font-size:13px;color:#374151;margin-top:2px;line-height:1.5;"><?= nl2br(htmlspecialchars($eval ?: '—')) ?></div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div style="font-size:11px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Rencana Tindak Lanjut</div>
+                                            <div style="font-size:13px;color:#374151;margin-top:2px;line-height:1.5;"><?= nl2br(htmlspecialchars($rtl ?: '—')) ?></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <?php if ($isOpen): ?>
+                                <a href="<?= BASE_URL ?>/user/realisasi.php?id=<?= $specificId ?>&edit_tw=<?= $tw ?>#panel-tw<?= $tw ?>"
+                                   class="btn-migas-outline btn" style="font-size:12.5px;">
+                                    <i class="bi bi-pencil me-1"></i>Edit TW <?= $tw ?>
+                                </a>
+                                <?php else: ?>
+                                <div style="font-size:12px;color:#9CA3AF;margin-top:4px;">
+                                    <i class="bi bi-lock-fill me-1"></i>Hubungi admin untuk membuka periode TW <?= $tw ?> jika ingin mengedit.
                                 </div>
                                 <?php endif; ?>
 
-                                <!-- Realisasi -->
+                                <?php else: ?>
+                                <!-- ===== MODE INPUT/EDIT FORM ===== -->
+
+                                <?php if (!$isOpen && !$twTerisi): ?>
+                                <div class="alert alert-warning" style="font-size:12.5px;border-radius:8px;">
+                                    <i class="bi bi-lock-fill me-1"></i>
+                                    Periode TW <?= $tw ?> belum dibuka oleh admin.
+                                </div>
+                                <?php endif; ?>
+
+                                <?php if ($isEditMode): ?>
+                                <div class="alert alert-info" style="font-size:12.5px;border-radius:8px;background:#EFF6FF;border-color:#BFDBFE;color:#1E40AF;">
+                                    <i class="bi bi-pencil-square me-1"></i>
+                                    Mode edit TW <?= $tw ?> —
+                                    <a href="<?= BASE_URL ?>/user/realisasi.php?id=<?= $specificId ?>" style="color:#1E40AF;font-weight:600;">Batal Edit</a>
+                                </div>
+                                <?php endif; ?>
+
+                                <?php $dis = (!$isOpen && !$isEditMode) ? 'disabled' : ''; ?>
+
+                                <!-- Realisasi + Satuan -->
                                 <div class="mb-3">
                                     <label class="form-label">
-                                        Realisasi TW <?= $tw ?>
-                                        <?= $isOpen ? '<span style="color:#EF4444;">*</span>' : '' ?>
+                                        Realisasi TW <?= $tw ?> <span style="color:#EF4444;">*</span>
                                     </label>
-                                    <input type="number" step="0.0001" name="tw<?= $tw ?>"
-                                           class="form-control" value="<?= htmlspecialchars($val) ?>"
-                                           placeholder="Masukkan nilai realisasi"
-                                           <?= $dis ?> <?= $isOpen ? 'required' : '' ?>>
-                                    <?php if (!$isOpen): ?>
-                                    <input type="hidden" name="tw<?= $tw ?>" value="<?= htmlspecialchars($val) ?>">
-                                    <?php endif; ?>
+                                    <div class="input-group" style="max-width:320px;">
+                                        <input type="text" inputmode="decimal" name="tw<?= $tw ?>"
+                                               class="form-control tw-input"
+                                               value="<?= htmlspecialchars(str_replace('.', ',', $val)) ?>"
+                                               placeholder="Contoh: 12,50"
+                                               pattern="^\d+([,]\d{1,2})?$"
+                                               title="Gunakan koma untuk desimal, maksimal 2 angka di belakang koma"
+                                               autocomplete="off"
+                                               <?= $dis ?>>
+                                        <span class="input-group-text"
+                                              style="background:#F5A623;border-color:#F5A623;color:#1A1A1A;font-weight:700;font-size:12.5px;">
+                                            <?= htmlspecialchars($indikator['satuan']) ?>
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <!-- Link Data Dukung -->
                                 <div class="mb-3">
-                                    <label class="form-label">
-                                        Link Data Dukung TW <?= $tw ?>
-                                        <?= $isOpen ? '<span style="color:#EF4444;">*</span>' : '' ?>
-                                    </label>
+                                    <label class="form-label">Link Data Dukung TW <?= $tw ?></label>
                                     <input type="url" name="link_tw<?= $tw ?>"
-                                           class="form-control" value="<?= htmlspecialchars($link) ?>"
+                                           class="form-control"
+                                           value="<?= htmlspecialchars($link) ?>"
                                            placeholder="https://drive.google.com/..."
                                            <?= $dis ?>>
-                                    <?php if (!$isOpen): ?>
-                                    <input type="hidden" name="link_tw<?= $tw ?>" value="<?= htmlspecialchars($link) ?>">
-                                    <?php endif; ?>
                                     <div class="form-text">Link ke dokumen atau bukti pendukung TW <?= $tw ?></div>
                                 </div>
 
                                 <!-- Evaluasi -->
                                 <div class="mb-3">
-                                    <label class="form-label">
-                                        Evaluasi / Penjelasan Capaian TW <?= $tw ?>
-                                        <?= $isOpen ? '<span style="color:#EF4444;">*</span>' : '' ?>
-                                    </label>
+                                    <label class="form-label">Evaluasi / Penjelasan Capaian TW <?= $tw ?></label>
                                     <textarea name="evaluasi_tw<?= $tw ?>" class="form-control" rows="3"
                                               placeholder="Tuliskan penjelasan capaian TW <?= $tw ?>..."
                                               <?= $dis ?>><?= htmlspecialchars($eval) ?></textarea>
-                                    <?php if (!$isOpen): ?>
-                                    <input type="hidden" name="evaluasi_tw<?= $tw ?>" value="<?= htmlspecialchars($eval) ?>">
-                                    <?php endif; ?>
                                 </div>
 
                                 <!-- Tindak Lanjut -->
                                 <div class="mb-3">
-                                    <label class="form-label">
-                                        Rencana Tindak Lanjut TW <?= $tw ?>
-                                        <?= $isOpen ? '<span style="color:#EF4444;">*</span>' : '' ?>
-                                    </label>
+                                    <label class="form-label">Rencana Tindak Lanjut TW <?= $tw ?></label>
                                     <textarea name="tindak_lanjut_tw<?= $tw ?>" class="form-control" rows="3"
                                               placeholder="Tuliskan rencana tindak lanjut TW <?= $tw ?>..."
                                               <?= $dis ?>><?= htmlspecialchars($rtl) ?></textarea>
-                                    <?php if (!$isOpen): ?>
-                                    <input type="hidden" name="tindak_lanjut_tw<?= $tw ?>" value="<?= htmlspecialchars($rtl) ?>">
-                                    <?php endif; ?>
                                 </div>
+
+                                <!-- Tombol Simpan per TW — hanya di mode input/edit -->
+                                <div class="mt-4 d-flex gap-2">
+                                    <button type="submit" class="btn-migas btn">
+                                        <i class="bi bi-check2-circle me-1"></i>Simpan Realisasi
+                                    </button>
+                                    <a href="<?= BASE_URL ?>/user/realisasi.php?id=<?= $specificId ?>" class="btn-migas-outline btn">
+                                        Batal
+                                    </a>
+                                </div>
+
+                                <?php endif; // end read-only vs form ?>
 
                             </div>
                             <?php endforeach; ?>
-                        </div>
-
-                        <!-- Total Realisasi Manual -->
-                        <div class="mt-3 p-3 rounded-3" style="background:#F9FAFB;border:1.5px solid #E5E7EB;">
-                            <label class="form-label">Total Realisasi (Isi Manual)</label>
-                            <input type="number" step="0.0001" name="total_realisasi"
-                                   class="form-control" style="max-width:220px;"
-                                   value="<?= htmlspecialchars($realisasi['total_realisasi'] ?? '') ?>"
-                                   placeholder="Total keseluruhan">
-                            <div class="form-text">Isi total realisasi TW I + II + III + IV secara manual.</div>
-                        </div>
-
-                        <div class="mt-4 d-flex gap-2">
-                            <button type="submit" class="btn-migas btn">
-                                <i class="bi bi-check2-circle me-1"></i>Simpan Realisasi
-                            </button>
-                            <a href="<?= BASE_URL ?>/user/indikator.php" class="btn-migas-outline btn">
-                                Batal
-                            </a>
                         </div>
 
                         </div><!-- /p-4 -->
@@ -352,7 +512,6 @@ include __DIR__ . '/../includes/sidebar.php';
 </div>
 
 <script>
-// Aktifkan tab styling on click
 document.querySelectorAll('#twTabs button').forEach(btn => {
     btn.addEventListener('shown.bs.tab', function() {
         document.querySelectorAll('#twTabs button').forEach(b => {
@@ -367,4 +526,34 @@ document.querySelectorAll('#twTabs button').forEach(btn => {
 });
 </script>
 
+<script>
+// Validasi & format input TW: hanya angka dan koma, max 2 desimal
+document.querySelectorAll('.tw-input').forEach(function(input) {
+    input.addEventListener('input', function() {
+        // Hapus karakter selain angka dan koma
+        this.value = this.value.replace(/[^0-9,]/g, '');
+        // Pastikan hanya ada 1 koma
+        var parts = this.value.split(',');
+        if (parts.length > 2) {
+            this.value = parts[0] + ',' + parts.slice(1).join('');
+        }
+        // Max 2 digit setelah koma
+        if (parts[1] && parts[1].length > 2) {
+            this.value = parts[0] + ',' + parts[1].substring(0, 2);
+        }
+    });
+    // Validasi saat form submit
+    input.closest('form')?.addEventListener('submit', function(e) {
+        var val = input.value.trim();
+        if (val && !/^\d+([,]\d{1,2})?$/.test(val)) {
+            e.preventDefault();
+            input.focus();
+            input.setCustomValidity('Format tidak valid. Contoh: 12,50');
+            input.reportValidity();
+        } else {
+            input.setCustomValidity('');
+        }
+    });
+});
+</script>
 <?php include __DIR__ . '/../includes/footer.php'; ?>

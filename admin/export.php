@@ -21,7 +21,6 @@ $stmt = $db->prepare("
     SELECT i.nama_indikator, i.leveling, i.satuan, i.pic,
            COALESCE(r.tw1,'') tw1, COALESCE(r.tw2,'') tw2,
            COALESCE(r.tw3,'') tw3, COALESCE(r.tw4,'') tw4,
-           COALESCE(r.total_realisasi,'') total,
            COALESCE(r.link_tw1,'') link_tw1, COALESCE(r.evaluasi_tw1,'') eval_tw1, COALESCE(r.tindak_lanjut_tw1,'') rtl_tw1,
            COALESCE(r.link_tw2,'') link_tw2, COALESCE(r.evaluasi_tw2,'') eval_tw2, COALESCE(r.tindak_lanjut_tw2,'') rtl_tw2,
            COALESCE(r.link_tw3,'') link_tw3, COALESCE(r.evaluasi_tw3,'') eval_tw3, COALESCE(r.tindak_lanjut_tw3,'') rtl_tw3,
@@ -50,7 +49,6 @@ echo "\xEF\xBB\xBF";
     .th-tw2  { background:#065F46; color:#fff; border:1px solid #555; padding:5px 7px; text-align:center; font-weight:bold; font-size:8.5pt; }
     .th-tw3  { background:#92400E; color:#fff; border:1px solid #555; padding:5px 7px; text-align:center; font-weight:bold; font-size:8.5pt; }
     .th-tw4  { background:#5B21B6; color:#fff; border:1px solid #555; padding:5px 7px; text-align:center; font-weight:bold; font-size:8.5pt; }
-    .th-total{ background:#F5A623; color:#1A1A1A; border:1px solid #555; padding:5px 7px; text-align:center; font-weight:bold; font-size:8.5pt; }
     td { border:1px solid #ccc; padding:5px 7px; vertical-align:top; font-size:8.5pt; }
     tr:nth-child(even) td { background:#FAFAFA; }
     .num { text-align:center; }
@@ -74,7 +72,6 @@ echo "\xEF\xBB\xBF";
     <th class="th-tw2" colspan="4">Triwulan II</th>
     <th class="th-tw3" colspan="4">Triwulan III</th>
     <th class="th-tw4" colspan="4">Triwulan IV</th>
-    <th class="th-total" rowspan="2">Total Realisasi</th>
 </tr>
 <tr>
     <th class="th-tw1">Realisasi</th><th class="th-tw1">Link Data Dukung</th><th class="th-tw1">Evaluasi</th><th class="th-tw1">Tindak Lanjut</th>
@@ -107,7 +104,6 @@ echo "\xEF\xBB\xBF";
     <td><?= htmlspecialchars($row['link_tw4']) ?></td>
     <td><?= htmlspecialchars($row['eval_tw4']) ?></td>
     <td><?= htmlspecialchars($row['rtl_tw4']) ?></td>
-    <td class="num"><b><?= $row['total'] ?></b></td>
 </tr>
 <?php endforeach; ?>
 </tbody>

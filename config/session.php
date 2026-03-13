@@ -73,3 +73,31 @@ function getFlash(string $key): string {
     unset($_SESSION["flash_$key"]);
     return $msg;
 }
+
+/**
+ * Catat aktivitas ke tabel activity_log
+ *
+ * @param string $action     Kode aksi singkat, misal: 'LOGIN', 'SIMPAN_REALISASI'
+ * @param string $description Keterangan lengkap aktivitas
+ * @param string $module     Modul terkait, misal: 'realisasi', 'indikator', 'users'
+ */
+function logActivity(string $action, string $description = '', string $module = ''): void {
+    try {
+        $db       = getDB();
+        $userId   = $_SESSION['user_id'] ?? null;
+        $username = $_SESSION['username'] ?? 'guest';
+        $role     = $_SESSION['role'] ?? null;
+        $ip       = $_SERVER['HTTP_X_FORWARDED_FOR']
+                    ?? $_SERVER['REMOTE_ADDR']
+                    ?? '0.0.0.0';
+
+        $stmt = $db->prepare("
+            INSERT INTO activity_log (user_id, username, role, action, description, module, ip_address)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->bind_param('issssss', $userId, $username, $role, $action, $description, $module, $ip);
+        $stmt->execute();
+    } catch (Throwable $e) {
+        // Jangan sampai error log mengganggu jalannya aplikasi
+    }
+}

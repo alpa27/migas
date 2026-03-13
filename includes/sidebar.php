@@ -38,6 +38,9 @@ function navLink(string $href, string $icon, string $label, string $currentFile,
             <?= navLink(BASE_URL.'/admin/periode.php',    'calendar3',     'Periode / TW',      $currentFile, 'periode.php') ?>
             <?= navLink(BASE_URL.'/admin/import.php',     'upload',        'Import Indikator',  $currentFile, 'import.php') ?>
 
+            <div class="sidebar-section">Sistem</div>
+            <?= navLink(BASE_URL.'/admin/activity_log.php', 'clock-history', 'Log Aktivitas',     $currentFile, 'activity_log.php') ?>
+
         <?php else: ?>
             <div class="sidebar-section">Menu</div>
             <?= navLink(BASE_URL.'/user/dashboard.php',  'speedometer2',  'Dashboard',     $currentFile, 'dashboard.php') ?>

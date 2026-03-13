@@ -23,51 +23,62 @@ $realisasi = $stmt2->get_result()->fetch_assoc() ?? [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $d = [];
     foreach ([1,2,3,4] as $tw) {
-        $d["tw$tw"]               = $_POST["tw$tw"] !== '' ? (float)$_POST["tw$tw"] : null;
-        $d["link_tw$tw"]          = trim($_POST["link_tw$tw"] ?? '');
-        $d["evaluasi_tw$tw"]      = trim($_POST["evaluasi_tw$tw"] ?? '');
+        $postVal = trim($_POST["tw$tw"] ?? '');
+        $postVal = str_replace(',', '.', $postVal); // koma → titik untuk DB
+        $d["tw$tw"]               = $postVal !== '' ? (float)$postVal : null;
+        $d["link_tw$tw"]          = trim($_POST["link_tw$tw"]          ?? '');
+        $d["evaluasi_tw$tw"]      = trim($_POST["evaluasi_tw$tw"]      ?? '');
         $d["tindak_lanjut_tw$tw"] = trim($_POST["tindak_lanjut_tw$tw"] ?? '');
     }
-    $d['total'] = $_POST['total_realisasi'] !== '' ? (float)$_POST['total_realisasi'] : null;
     $uid = $_SESSION['user_id'];
 
     if ($realisasi) {
-        $upd = $db->prepare("UPDATE realisasi SET
-            tw1=?,tw2=?,tw3=?,tw4=?,total_realisasi=?,
-            link_tw1=?,evaluasi_tw1=?,tindak_lanjut_tw1=?,
-            link_tw2=?,evaluasi_tw2=?,tindak_lanjut_tw2=?,
-            link_tw3=?,evaluasi_tw3=?,tindak_lanjut_tw3=?,
-            link_tw4=?,evaluasi_tw4=?,tindak_lanjut_tw4=?,
-            updated_by=? WHERE indikator_id=? AND tahun_id=?");
-        $upd->bind_param('dddddssssssssssssiii',
-            $d['tw1'],$d['tw2'],$d['tw3'],$d['tw4'],$d['total'],
-            $d['link_tw1'],$d['evaluasi_tw1'],$d['tindak_lanjut_tw1'],
-            $d['link_tw2'],$d['evaluasi_tw2'],$d['tindak_lanjut_tw2'],
-            $d['link_tw3'],$d['evaluasi_tw3'],$d['tindak_lanjut_tw3'],
-            $d['link_tw4'],$d['evaluasi_tw4'],$d['tindak_lanjut_tw4'],
+        // UPDATE — tanpa total_realisasi (generated column)
+        $upd = $db->prepare("
+            UPDATE realisasi SET
+                tw1=?, tw2=?, tw3=?, tw4=?,
+                link_tw1=?, evaluasi_tw1=?, tindak_lanjut_tw1=?,
+                link_tw2=?, evaluasi_tw2=?, tindak_lanjut_tw2=?,
+                link_tw3=?, evaluasi_tw3=?, tindak_lanjut_tw3=?,
+                link_tw4=?, evaluasi_tw4=?, tindak_lanjut_tw4=?,
+                updated_by=?
+            WHERE indikator_id=? AND tahun_id=?
+        ");
+        $upd->bind_param('ddddssssssssssssiii',
+            $d['tw1'], $d['tw2'], $d['tw3'], $d['tw4'],
+            $d['link_tw1'], $d['evaluasi_tw1'], $d['tindak_lanjut_tw1'],
+            $d['link_tw2'], $d['evaluasi_tw2'], $d['tindak_lanjut_tw2'],
+            $d['link_tw3'], $d['evaluasi_tw3'], $d['tindak_lanjut_tw3'],
+            $d['link_tw4'], $d['evaluasi_tw4'], $d['tindak_lanjut_tw4'],
             $uid, $id, $tid
         );
         $upd->execute();
     } else {
-        $ins = $db->prepare("INSERT INTO realisasi
-            (indikator_id,tahun_id,tw1,tw2,tw3,tw4,total_realisasi,
-            link_tw1,evaluasi_tw1,tindak_lanjut_tw1,
-            link_tw2,evaluasi_tw2,tindak_lanjut_tw2,
-            link_tw3,evaluasi_tw3,tindak_lanjut_tw3,
-            link_tw4,evaluasi_tw4,tindak_lanjut_tw4,updated_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-        $ins->bind_param('iidddddsssssssssssi',
-            $id,$tid,
-            $d['tw1'],$d['tw2'],$d['tw3'],$d['tw4'],$d['total'],
-            $d['link_tw1'],$d['evaluasi_tw1'],$d['tindak_lanjut_tw1'],
-            $d['link_tw2'],$d['evaluasi_tw2'],$d['tindak_lanjut_tw2'],
-            $d['link_tw3'],$d['evaluasi_tw3'],$d['tindak_lanjut_tw3'],
-            $d['link_tw4'],$d['evaluasi_tw4'],$d['tindak_lanjut_tw4'],
+        // INSERT — tanpa total_realisasi (generated column)
+        $ins = $db->prepare("
+            INSERT INTO realisasi
+                (indikator_id, tahun_id,
+                 tw1, tw2, tw3, tw4,
+                 link_tw1, evaluasi_tw1, tindak_lanjut_tw1,
+                 link_tw2, evaluasi_tw2, tindak_lanjut_tw2,
+                 link_tw3, evaluasi_tw3, tindak_lanjut_tw3,
+                 link_tw4, evaluasi_tw4, tindak_lanjut_tw4,
+                 updated_by)
+            VALUES (?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?)
+        ");
+        $ins->bind_param('iiddddssssssssssssi',
+            $id, $tid,
+            $d['tw1'], $d['tw2'], $d['tw3'], $d['tw4'],
+            $d['link_tw1'], $d['evaluasi_tw1'], $d['tindak_lanjut_tw1'],
+            $d['link_tw2'], $d['evaluasi_tw2'], $d['tindak_lanjut_tw2'],
+            $d['link_tw3'], $d['evaluasi_tw3'], $d['tindak_lanjut_tw3'],
+            $d['link_tw4'], $d['evaluasi_tw4'], $d['tindak_lanjut_tw4'],
             $uid
         );
         $ins->execute();
     }
 
+    logActivity('EDIT_REALISASI', "Admin edit realisasi: " . mb_strimwidth($indikator['nama_indikator'], 0, 60, '…'), 'realisasi');
     flash('success', 'Realisasi berhasil disimpan.');
     redirect(BASE_URL . '/admin/indikator.php');
 }
@@ -85,6 +96,10 @@ include __DIR__ . '/../includes/sidebar.php';
     </div>
 
     <div class="page-content">
+        <?php $msg = getFlash('success'); if ($msg): ?>
+            <div class="alert alert-success alert-auto-hide"><?= htmlspecialchars($msg) ?></div>
+        <?php endif; ?>
+
         <div class="card-box">
             <div class="card-box-header">
                 <div>
@@ -117,17 +132,31 @@ include __DIR__ . '/../includes/sidebar.php';
 
                 <div class="tab-content pt-4" id="twTabContent">
                     <?php foreach([1,2,3,4] as $tw):
-                        $val  = $realisasi["tw$tw"] ?? '';
-                        $link = $realisasi["link_tw$tw"] ?? '';
-                        $eval = $realisasi["evaluasi_tw$tw"] ?? '';
+                        $val  = $realisasi["tw$tw"]               ?? '';
+                        $link = $realisasi["link_tw$tw"]          ?? '';
+                        $eval = $realisasi["evaluasi_tw$tw"]      ?? '';
                         $rtl  = $realisasi["tindak_lanjut_tw$tw"] ?? '';
+                        // Format angka dari DB: titik → koma
+                        $valDisplay = ($val !== '' && $val !== null)
+                            ? number_format((float)$val, 2, ',', '.')
+                            : '';
                     ?>
                     <div class="tab-pane fade <?= $tw===1?'show active':'' ?>" id="panel-tw<?= $tw ?>">
                         <div class="mb-3">
                             <label class="form-label">Realisasi TW <?= $tw ?></label>
-                            <input type="number" step="0.0001" name="tw<?= $tw ?>"
-                                   class="form-control" style="max-width:220px;"
-                                   value="<?= htmlspecialchars($val) ?>" placeholder="—">
+                            <div class="input-group" style="max-width:280px;">
+                                <input type="text" inputmode="decimal" name="tw<?= $tw ?>"
+                                       class="form-control tw-input"
+                                       value="<?= htmlspecialchars($valDisplay) ?>"
+                                       placeholder="Contoh: 12,50"
+                                       pattern="^\d+([,]\d{1,2})?$"
+                                       title="Gunakan koma untuk desimal, maks 2 angka di belakang koma"
+                                       autocomplete="off">
+                                <span class="input-group-text"
+                                      style="background:#F5A623;border-color:#F5A623;color:#1A1A1A;font-weight:700;font-size:12.5px;">
+                                    <?= htmlspecialchars($indikator['satuan']) ?>
+                                </span>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Link Data Dukung TW <?= $tw ?></label>
@@ -148,19 +177,9 @@ include __DIR__ . '/../includes/sidebar.php';
                     <?php endforeach; ?>
                 </div>
 
-                <!-- Total Manual -->
-                <div class="mt-3 p-3 rounded-3" style="background:#F9FAFB;border:1.5px solid #E5E7EB;">
-                    <label class="form-label">Total Realisasi (Isi Manual)</label>
-                    <input type="number" step="0.0001" name="total_realisasi"
-                           class="form-control" style="max-width:220px;"
-                           value="<?= htmlspecialchars($realisasi['total_realisasi'] ?? '') ?>"
-                           placeholder="Total keseluruhan">
-                    <div class="form-text">Isi total realisasi secara manual.</div>
-                </div>
-
                 <div class="mt-4 d-flex gap-2">
                     <button type="submit" class="btn-migas btn">
-                        <i class="bi bi-check2-circle me-1"></i>Simpan
+                        <i class="bi bi-check2-circle me-1"></i>Simpan Perubahan
                     </button>
                     <a href="<?= BASE_URL ?>/admin/indikator.php" class="btn-migas-outline btn">Batal</a>
                 </div>
@@ -168,5 +187,20 @@ include __DIR__ . '/../includes/sidebar.php';
         </div>
     </div>
 </div>
+
+<script>
+document.querySelectorAll('.tw-input').forEach(function(input) {
+    input.addEventListener('input', function() {
+        this.value = this.value.replace(/[^0-9,]/g, '');
+        var parts = this.value.split(',');
+        if (parts.length > 2) {
+            this.value = parts[0] + ',' + parts.slice(1).join('');
+        }
+        if (parts[1] && parts[1].length > 2) {
+            this.value = parts[0] + ',' + parts[1].substring(0, 2);
+        }
+    });
+});
+</script>
 
 <?php include __DIR__ . '/../includes/footer.php'; ?>

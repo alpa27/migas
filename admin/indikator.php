@@ -148,11 +148,11 @@ include __DIR__ . '/../includes/header.php';
                             <td><span class="badge-pic"><?= htmlspecialchars($row['pic']) ?></span></td>
                             <?php foreach([1,2,3,4] as $tw): ?>
                                 <td class="text-center" style="font-family:'DM Mono',monospace;font-size:12px;">
-                                    <?= $row["tw$tw"] !== null ? number_format($row["tw$tw"],2) : '<span style="color:#D1D5DB;">—</span>' ?>
+                                    <?= $row["tw$tw"] !== null ? number_format((float)$row["tw$tw"],2,',','.') : '<span style="color:#D1D5DB;">—</span>' ?>
                                 </td>
                             <?php endforeach; ?>
                             <td class="text-center fw-bold" style="font-family:'DM Mono',monospace;font-size:12px;">
-                                <?= $row['total_realisasi'] !== null ? number_format($row['total_realisasi'],2) : '<span style="color:#D1D5DB;">—</span>' ?>
+                                <?= $row['total_realisasi'] !== null ? number_format((float)$row['total_realisasi'],2,',','.') : '<span style="color:#D1D5DB;">—</span>' ?>
                             </td>
                             <td class="text-center">
                                 <a href="<?= BASE_URL ?>/admin/edit_realisasi.php?id=<?= $row['id'] ?>"

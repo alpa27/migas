@@ -23,8 +23,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['nama']          = $user['nama_lengkap'];
             $_SESSION['role']          = $user['role'];
             $_SESSION['kode_kelompok'] = $user['kode_kelompok'];
+            logActivity('LOGIN', 'Login berhasil sebagai ' . $user['role'], 'auth');
             redirect($user['role'] === 'admin' ? BASE_URL.'/admin/dashboard.php' : BASE_URL.'/user/dashboard.php');
         } else {
+            // Log login gagal (tanpa session)
+            try {
+                $db2 = getDB();
+                $ip2 = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+                $db2->query("INSERT INTO activity_log (username, action, description, module, ip_address) VALUES ('" . $db2->escape_string($username) . "', 'LOGIN_GAGAL', 'Percobaan login gagal', 'auth', '$ip2')");
+            } catch(Throwable $e) {}
             $error = 'Username atau password salah.';
         }
     } else {

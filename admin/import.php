@@ -99,7 +99,6 @@ function detectCols($header) {
     $cNama = false; $cLevel = false; $cSatuan = false; $cPic = false;
     foreach ($header as $i => $h) {
         $h = strtolower(trim($h));
-        // Nama indikator: kolom yang headernya mengandung kata kunci indikator/iksp/iksk/sasaran/program/kegiatan
         if ($cNama   === false && (
             strpos($h,'indikator') !== false ||
             strpos($h,'iksp')     !== false ||
@@ -112,11 +111,7 @@ function detectCols($header) {
         if ($cSatuan === false && strpos($h,'satuan')   !== false) $cSatuan = $i;
         if ($cPic    === false && strpos($h,'pic')      !== false) $cPic    = $i;
     }
-    // Default sesuai format Excel Matriks Kinerja Ditjen Migas:
-    // Kolom A (0) = Nama Indikator
-    // Kolom B (1) = Leveling
-    // Kolom C (2) = Satuan
-    // Kolom D (3) = PIC
+    // Default: A(0)=Nama, B(1)=Leveling, C(2)=Satuan, D(3)=PIC
     return [
         $cNama   !== false ? $cNama   : 0,
         $cLevel  !== false ? $cLevel  : 1,
@@ -169,6 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
             $rows      = $data['rows'];
             $sheetInfo = $data['summary'];
 
+            // Cari baris header
             $headerIdx = 0;
             foreach ($rows as $i => $row) {
                 $str = strtolower(implode(' ', $row));
@@ -179,7 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
 
             [$cNama, $cLevel, $cSatuan, $cPic] = detectCols($rows[$headerIdx] ?? []);
 
-            $inserted = 0; $skipped = 0; $urutan = 1;
+            $inserted    = 0;
+            $skipped     = 0;
+            $skippedPic  = 0;       // ← counter khusus PIC 5+ huruf
+            $skippedPicList = [];   // ← daftar PIC yang diskip (untuk laporan)
+            $urutan      = 1;
             $parentStack = [1 => null, 2 => null, 3 => null, 4 => null];
 
             $stmtIns = $db->prepare(
@@ -198,9 +198,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
                 $satuan   = trim($row[$cSatuan] ?? '');
                 $pic      = trim($row[$cPic]    ?? '');
 
+                // Validasi dasar
                 if (!$nama || !in_array($leveling, $validLeveling) || !$satuan || !$pic) {
                     $skipped++; continue;
                 }
+
+                // ── FILTER PIC TIDAK VALID — otomatis skip ───────────────────
+                // Skip jika: lebih dari 4 huruf, mengandung angka, atau mengandung titik
+                $picInvalid = (strlen($pic) > 4)
+                           || preg_match('/[0-9]/', $pic)
+                           || strpos($pic, '.') !== false;
+                if ($picInvalid) {
+                    $skippedPic++;
+                    if (!in_array($pic, $skippedPicList)) $skippedPicList[] = $pic;
+                    continue;
+                }
+                // ─────────────────────────────────────────────────────────────
 
                 $lvl      = $levelOrder[$leveling];
                 $parentId = $lvl > 1 ? $parentStack[$lvl - 1] : null;
@@ -228,13 +241,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
             }
 
             $result = [
-                'inserted'   => $inserted,
-                'skipped'    => $skipped,
-                'sheetName'  => $data['sheetName'],
-                'sheetCount' => $data['sheetCount'],
-                'validCount' => $data['validCount'],
-                'filename'   => htmlspecialchars($file['name']),
+                'inserted'       => $inserted,
+                'skipped'        => $skipped,
+                'skippedPic'     => $skippedPic,
+                'skippedPicList' => $skippedPicList,
+                'sheetName'      => $data['sheetName'],
+                'sheetCount'     => $data['sheetCount'],
+                'validCount'     => $data['validCount'],
+                'filename'       => htmlspecialchars($file['name']),
             ];
+            logActivity(
+                'IMPORT_EXCEL',
+                "Import indikator dari file: {$file['name']} — $inserted indikator berhasil, $skipped dilewati (tahun: {$tahun['tahun']})",
+                'indikator'
+            );
         }
     }
 }
@@ -309,22 +329,44 @@ include __DIR__ . '/../includes/sidebar.php';
                             <div style="font-size:16px;font-weight:900;color:#065F46;margin-bottom:4px;">Import Berhasil!</div>
                             <div style="font-size:12.5px;color:#047857;">
                                 File: <strong><?= $result['filename'] ?></strong>
-                                &nbsp;·&nbsp; Sheet aktif: <strong>"<?= htmlspecialchars($result['sheetName']) ?>"</strong>
-                                &nbsp;·&nbsp; Total <?= $result['sheetCount'] ?> sheet di file
+                                &nbsp;·&nbsp; Sheet: <strong>"<?= htmlspecialchars($result['sheetName']) ?>"</strong>
+                                &nbsp;·&nbsp; <?= $result['sheetCount'] ?> sheet di file
                             </div>
 
+                            <!-- Stat pills -->
                             <div class="d-flex gap-2 flex-wrap mt-3">
                                 <span style="background:#059669;color:#fff;font-size:13px;font-weight:700;padding:7px 18px;border-radius:8px;">
                                     <i class="bi bi-check-circle me-1"></i><?= number_format($result['inserted']) ?> indikator diimpor
                                 </span>
+                                <?php if ($result['skippedPic'] > 0): ?>
+                                <span style="background:#FEF3C7;color:#92400E;font-size:13px;font-weight:700;padding:7px 18px;border-radius:8px;">
+                                    <i class="bi bi-funnel me-1"></i><?= number_format($result['skippedPic']) ?> difilter (PIC &gt;4 huruf)
+                                </span>
+                                <?php endif; ?>
                                 <span style="background:#F3F4F6;color:#6B7280;font-size:13px;font-weight:700;padding:7px 18px;border-radius:8px;">
                                     <?= number_format($result['skipped']) ?> baris dilewati
                                 </span>
-                                <span style="background:#DBEAFE;color:#1D4ED8;font-size:13px;font-weight:700;padding:7px 18px;border-radius:8px;">
-                                    <?= $result['validCount'] ?> baris valid di sheet
-                                </span>
                             </div>
 
+                            <!-- Daftar PIC yang difilter -->
+                            <?php if (!empty($result['skippedPicList'])): ?>
+                            <div class="mt-3 p-3 rounded-2" style="background:#FFFBEB;border:1px solid #FDE68A;">
+                                <div style="font-size:11.5px;font-weight:700;color:#92400E;margin-bottom:6px;">
+                                    <i class="bi bi-funnel me-1"></i>Kode PIC yang otomatis difilter (lebih dari 4 huruf):
+                                </div>
+                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                    <?php foreach ($result['skippedPicList'] as $p): ?>
+                                    <span style="font-family:'DM Mono',monospace;font-size:12px;font-weight:700;
+                                                 background:#FEF3C7;color:#92400E;padding:3px 10px;border-radius:5px;
+                                                 border:1px solid #FDE68A;">
+                                        <?= htmlspecialchars($p) ?>
+                                    </span>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+
+                            <!-- Preview hierarki -->
                             <?php if ($preview): ?>
                             <div class="mt-3 p-3 rounded-2" style="background:#DCFCE7;border:1px solid #86EFAC;">
                                 <div style="font-size:11.5px;font-weight:700;color:#065F46;margin-bottom:8px;">
@@ -375,7 +417,7 @@ include __DIR__ . '/../includes/sidebar.php';
                 </div>
                 <?php endif; ?>
 
-                <!-- ── INFO SHEET DITEMUKAN (jika error) ── -->
+                <!-- ── INFO SHEET (jika error) ── -->
                 <?php if ($sheetInfo && !$result): ?>
                 <div class="card-box mb-4">
                     <div class="card-box-header">
@@ -430,6 +472,7 @@ include __DIR__ . '/../includes/sidebar.php';
                                     <li>Pastikan tabel indikator sudah <strong>dikosongkan</strong> dulu di phpMyAdmin agar tidak duplikat.</li>
                                     <li>Sistem otomatis <strong>memilih sheet</strong> yang paling banyak isi indikatornya.</li>
                                     <li>Hierarki <strong>IKSP → IKSK-2 → IKSK-3 → IKSK-4</strong> dibangun otomatis dari urutan baris.</li>
+                                    <li>Indikator dengan PIC <strong>lebih dari 4 huruf, mengandung angka, atau mengandung titik</strong> (contoh: DMIRPP, DPMA.1, DPMA.2) otomatis dilewati — tidak perlu hapus manual.</li>
                                     <li>File Excel dari Bang Ardan bisa langsung diupload <strong>tanpa perlu diubah</strong>.</li>
                                 </ul>
                             </div>
@@ -481,7 +524,7 @@ include __DIR__ . '/../includes/sidebar.php';
                                 <tr>
                                     <td>D (index 3)</td>
                                     <td>PIC</td>
-                                    <td>Kode kelompok PIC</td>
+                                    <td>Kode kelompok PIC (maks. 4 huruf)</td>
                                     <td style="font-size:12px;">DMEE, DMEN, DMO, SDM</td>
                                 </tr>
                             </tbody>
@@ -495,9 +538,9 @@ include __DIR__ . '/../includes/sidebar.php';
                             <div class="tree-item">&nbsp;&nbsp;&nbsp;&nbsp;└─ <span class="lv-iksk2">[IKSK-2]</span> Ketahanan Pasokan Gas Bumi</div>
                             <div class="tree-item">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ <span class="lv-iksk3">[IKSK-3]</span> Fasilitasi Infrastruktur Gas</div>
                             <div class="tree-item">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ <span class="lv-iksk4">[IKSK-4]</span> Laporan Evaluasi Infrastruktur Gas</div>
-                            <div class="mt-3 p-2 rounded-2" style="background:#DBEAFE;font-size:12px;color:#1D4ED8;">
-                                <i class="bi bi-lightbulb me-1"></i>
-                                Setelah import selesai, semua indikator langsung bisa dilihat di <strong>menu Semua Indikator</strong> di dashboard admin dan juga muncul di dashboard masing-masing kelompok (user) sesuai PIC-nya.
+                            <div class="mt-3 p-2 rounded-2" style="background:#FEF3C7;border:1px solid #FDE68A;font-size:12px;color:#92400E;">
+                                <i class="bi bi-funnel me-1"></i>
+                                <strong>Filter otomatis aktif:</strong> PIC yang dilewati otomatis: (1) lebih dari 4 huruf, (2) mengandung angka, (3) mengandung titik. Contoh yang dilewati: <code>DMIRPP</code>, <code>DPMA.1</code>, <code>DPMR.5</code>.
                             </div>
                         </div>
                     </div>

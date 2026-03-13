@@ -18,13 +18,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $stmt = $db->prepare("INSERT INTO users (username,password,nama_lengkap,role,kode_kelompok) VALUES (?,?,?,?,?)");
         $stmt->bind_param('sssss', $username, $pass, $nama, $role, $kode);
-        if ($stmt->execute()) flash('success', 'Pengguna berhasil ditambahkan.');
-        else flash('error', 'Username sudah digunakan.');
+        if ($stmt->execute()) {
+            logActivity('TAMBAH_USER', "Tambah pengguna baru: $username ($role)", 'users');
+            flash('success', 'Pengguna berhasil ditambahkan.');
+        } else flash('error', 'Username sudah digunakan.');
     }
 
     if ($action === 'toggle') {
         $uid = (int)$_POST['user_id'];
         $db->query("UPDATE users SET is_active = NOT is_active WHERE id=$uid");
+        $uRow = $db->query("SELECT username,is_active FROM users WHERE id=$uid")->fetch_assoc();
+        logActivity('TOGGLE_USER', "Status pengguna {$uRow['username']} diubah menjadi " . ($uRow['is_active']?'Aktif':'Nonaktif'), 'users');
         flash('success', 'Status pengguna diperbarui.');
     }
 
@@ -34,6 +38,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $db->prepare("UPDATE users SET password=? WHERE id=?");
         $stmt->bind_param('si', $pass, $uid);
         $stmt->execute();
+        $uRow2 = $db->query("SELECT username FROM users WHERE id=$uid")->fetch_assoc();
+        logActivity('RESET_PASSWORD', "Reset password untuk pengguna: {$uRow2['username']}", 'users');
         flash('success', 'Password berhasil direset.');
     }
 
